@@ -36,26 +36,28 @@ def load_data():
         st.stop()
 
     df = pd.read_csv(DATA_PATH)
-    df = df[["TEMP", "PH", "TURBIDITY", "DO"]].dropna()
+
+    required_cols = ["TEMP", "PH", "TURBIDITY", "DO"]
+    df = df[required_cols].dropna()
     df = df[(df["DO"] >= 0) & (df["PH"] >= 0)]
 
     return df
 
 df = load_data()
 
-# Optional debug confirmation
 st.sidebar.success(f"Loaded data from:\n{DATA_PATH}")
 
-# Subsample for stability + speed
-df = df.sample(1000, random_state=42).reset_index(drop=True)
+# Subsample for stability
+if len(df) > 1000:
+    df = df.sample(1000, random_state=42).reset_index(drop=True)
 
 # --------------------------------------------------
-# REFERENCE TEMPERATURE (AMBIENT PROXY)
+# REFERENCE TEMPERATURE
 # --------------------------------------------------
 T_ref = df["TEMP"].mean()
 
 # --------------------------------------------------
-# WQI CALCULATION (GROUND TRUTH)
+# WQI CALCULATION
 # --------------------------------------------------
 def compute_wqi(temp, ph, turb, do, T_ref):
     Q_pH = (abs(ph - 7.0) / 1.5) * 100
@@ -66,16 +68,15 @@ def compute_wqi(temp, ph, turb, do, T_ref):
     Q_Turb = (turb / 5.0) * 100
     Q_Temp = (abs(temp - T_ref) / 5.0) * 100
 
-    WQI = (
+    return (
         0.35 * Q_DO +
         0.25 * Q_pH +
         0.25 * Q_Turb +
         0.15 * Q_Temp
     )
-    return WQI
 
 # --------------------------------------------------
-# CALCULATED WQI FOR DATASET
+# CALCULATED WQI
 # --------------------------------------------------
 df["WQI_calc"] = df.apply(
     lambda r: compute_wqi(
@@ -85,7 +86,7 @@ df["WQI_calc"] = df.apply(
 )
 
 # --------------------------------------------------
-# ML SURROGATE MODEL (LINEAR REGRESSION)
+# ML SURROGATE MODEL
 # --------------------------------------------------
 X = df[["TEMP", "PH", "TURBIDITY", "DO"]]
 y = df["WQI_calc"]
@@ -118,7 +119,7 @@ c1.metric("RMSE", f"{rmse:.2f}")
 c2.metric("R²", f"{r2:.3f}")
 
 # --------------------------------------------------
-# CORE VISUAL: CALCULATED vs PREDICTED
+# CALCULATED vs PREDICTED PLOT
 # --------------------------------------------------
 st.subheader("📈 Calculated vs Predicted WQI")
 
@@ -132,10 +133,10 @@ ax.set_xlabel("Calculated WQI")
 ax.set_ylabel("Predicted WQI")
 
 st.pyplot(fig)
-st.caption("Dashed line = ideal agreement (Predicted = Calculated)")
+st.caption("Dashed line = ideal agreement")
 
 # --------------------------------------------------
-# FEATURE BOUNDS (DOMAIN CHECK)
+# FEATURE BOUNDS
 # --------------------------------------------------
 feature_bounds = {
     col: (X[col].min(), X[col].max())
@@ -154,24 +155,20 @@ turb = st.number_input("Turbidity (NTU)", 0.0, 100.0, 5.0)
 do = st.number_input("DO (mg/L)", 0.0, 15.0, 5.0)
 
 if st.button("Compare WQI"):
-    # Ground truth
     wqi_calc = compute_wqi(temp, ph, turb, do, T_ref)
 
-    # ML prediction
     wqi_pred = model.predict(pd.DataFrame(
         [[temp, ph, turb, do]],
         columns=["TEMP", "PH", "TURBIDITY", "DO"]
     ))[0]
 
-    # Domain validity check
-    out_of_domain = False
-    for col, val in zip(
-        ["TEMP", "PH", "TURBIDITY", "DO"],
-        [temp, ph, turb, do]
-    ):
-        low, high = feature_bounds[col]
-        if val < low or val > high:
-            out_of_domain = True
+    out_of_domain = any(
+        not (feature_bounds[c][0] <= v <= feature_bounds[c][1])
+        for c, v in zip(
+            ["TEMP", "PH", "TURBIDITY", "DO"],
+            [temp, ph, turb, do]
+        )
+    )
 
     c1, c2 = st.columns(2)
     c1.metric("Calculated WQI", f"{wqi_calc:.2f}")
@@ -180,5 +177,5 @@ if st.button("Compare WQI"):
     if out_of_domain:
         st.warning(
             "⚠️ Input lies outside the training data range. "
-            "Linear model extrapolation shown."
+            "Linear extrapolation in effect."
         )
