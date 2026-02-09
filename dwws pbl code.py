@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
+from pathlib import Path
+
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
@@ -19,16 +21,30 @@ st.title("💧 Calculated vs Predicted Water Quality Index")
 st.caption("Physics-based WQI vs Linear ML surrogate (extrapolation-safe)")
 
 # --------------------------------------------------
+# DATA PATH (GITHUB / STREAMLIT SAFE)
+# --------------------------------------------------
+BASE_DIR = Path(__file__).parent
+DATA_PATH = BASE_DIR / "Fish Ponds.csv"
+
+# --------------------------------------------------
 # LOAD DATA
 # --------------------------------------------------
 @st.cache_data
 def load_data():
-    df = pd.read_csv("Fish Ponds.csv")
+    if not DATA_PATH.exists():
+        st.error(f"Dataset not found at: {DATA_PATH}")
+        st.stop()
+
+    df = pd.read_csv(DATA_PATH)
     df = df[["TEMP", "PH", "TURBIDITY", "DO"]].dropna()
     df = df[(df["DO"] >= 0) & (df["PH"] >= 0)]
+
     return df
 
 df = load_data()
+
+# Optional debug confirmation
+st.sidebar.success(f"Loaded data from:\n{DATA_PATH}")
 
 # Subsample for stability + speed
 df = df.sample(1000, random_state=42).reset_index(drop=True)
@@ -141,7 +157,7 @@ if st.button("Compare WQI"):
     # Ground truth
     wqi_calc = compute_wqi(temp, ph, turb, do, T_ref)
 
-    # ML prediction (unbounded)
+    # ML prediction
     wqi_pred = model.predict(pd.DataFrame(
         [[temp, ph, turb, do]],
         columns=["TEMP", "PH", "TURBIDITY", "DO"]
